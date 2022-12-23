@@ -1,27 +1,34 @@
 class PhpAT73 < Formula
   desc "General-purpose scripting language"
   homepage "https://www.php.net/"
-  # Should only be updated if the new version is announced on the homepage, https://www.php.net/
-  url "https://www.php.net/distributions/php-7.3.33.tar.xz"
-  mirror "https://fossies.org/linux/www/php-7.3.33.tar.xz"
-  sha256 "166eaccde933381da9516a2b70ad0f447d7cec4b603d07b9a916032b215b90cc"
+  url "https://github.com/shivammathur/php-src-backports/archive/4aee3505738a19db5cf17dfbc6482a509a0919be.tar.gz"
+  version "7.3.33"
+  sha256 "ad149ad8bc894bddca13f8fb8d1a8465ac165e8386480f73b6e16c9de208239a"
   license "PHP-3.01"
-  revision 1
+  revision 3
 
   bottle do
-    sha256 monterey:     "93126a75527f2ebb61854eca3d828a2c85be368810d958891e82d01079186fcc"
-    sha256 big_sur:      "e1e2f43e53f5324dd918cb3c53ced792eb39d1a328fdc995df2cc11377c24f4f"
-    sha256 catalina:     "7a1587d14a448ec6c748c93dddde0bded32778dda5c9ee0321f3b9f610a7ffb9"
-    sha256 x86_64_linux: "98174faad5ea86e2bb3c29772d50cd9b62aeb684817bb8aa07fb06f59d66973a"
+    root_url "https://ghcr.io/v2/shivammathur/php"
+    rebuild 2
+    sha256 arm64_monterey: "daf66a5be8ddeb6234a044af3ea73d41d8423fb5cd856fd71591670773144bb6"
+    sha256 arm64_big_sur:  "2c2b287c8869a12066ded3034b42c4168a97ec2b5ca39a600d12b17f7178dfde"
+    sha256 monterey:       "561509e97156b9c73627db34a48802b84c50d483f36ccd4007d983387eaf7375"
+    sha256 big_sur:        "a1c1d94ca6de35b5920fc401c499ac3f30afd2eddee0fee01b1f64fa9f10b5ae"
+    sha256 x86_64_linux:   "1ee5c8fd407b2666dfd70de796cdbab18208ca0581fafe9629b006cfc9e5d2ed"
   end
 
   keg_only :versioned_formula
 
-  disable! date: "2021-12-06", because: :versioned_formula
+  # This PHP version is not supported upstream as of 2021-12-06.
+  # Although, this was built with back-ported security patches,
+  # we recommended to use a currently supported PHP version.
+  # For more details, refer to https://www.php.net/eol.php
+  deprecate! date: "2021-12-06", because: :deprecated_upstream
 
+  depends_on "bison" => :build
   depends_on "httpd" => [:build, :test]
   depends_on "pkg-config" => :build
-  depends_on "xz" => :build
+  depends_on "re2c" => :build
   depends_on "apr"
   depends_on "apr-util"
   depends_on "argon2"
@@ -40,11 +47,13 @@ class PhpAT73 < Formula
   depends_on "libzip"
   depends_on "openldap"
   depends_on "openssl@1.1"
+  depends_on "pcre2"
   depends_on "sqlite"
   depends_on "tidy-html5"
   depends_on "unixodbc"
   depends_on "webp"
 
+  uses_from_macos "xz" => :build
   uses_from_macos "bzip2"
   uses_from_macos "libedit"
   uses_from_macos "libxml2"
@@ -94,12 +103,12 @@ class PhpAT73 < Formula
     # Prevent system pear config from inhibiting pear install
     (config_path/"pear.conf").delete if (config_path/"pear.conf").exist?
 
-    # Prevent homebrew from hardcoding path to sed shim in phpize script
+    # Prevent homebrew from harcoding path to sed shim in phpize script
     ENV["lt_cv_path_SED"] = "sed"
 
     # Each extension that is built on Mojave needs a direct reference to the
     # sdk path or it won't find the headers
-
+    headers_path = ""
     headers_path = "=#{MacOS.sdk_path_if_needed}/usr" if OS.mac?
 
     args = %W[
@@ -152,6 +161,7 @@ class PhpAT73 < Formula
       --with-mysqli=mysqlnd
       --with-openssl=#{Formula["openssl@1.1"].opt_prefix}
       --with-password-argon2=#{Formula["argon2"].opt_prefix}
+      --with-pcre-regex=#{Formula["pcre2"].opt_prefix}
       --with-pdo-dblib=#{Formula["freetds"].opt_prefix}
       --with-pdo-mysql=mysqlnd
       --with-pdo-odbc=unixODBC,#{Formula["unixodbc"].opt_prefix}
@@ -199,15 +209,19 @@ class PhpAT73 < Formula
     extension_dir = Utils.safe_popen_read("#{bin}/php-config", "--extension-dir").chomp
     orig_ext_dir = File.basename(extension_dir)
     inreplace bin/"php-config", lib/"php", prefix/"pecl"
-    inreplace "php.ini-development", %r{; ?extension_dir = "\./"},
-      "extension_dir = \"#{HOMEBREW_PREFIX}/lib/php/pecl/#{orig_ext_dir}\""
+    %w[development production].each do |mode|
+      inreplace "php.ini-#{mode}", %r{; ?extension_dir = "\./"},
+        "extension_dir = \"#{HOMEBREW_PREFIX}/lib/php/pecl/#{orig_ext_dir}\""
+    end
 
     # Use OpenSSL cert bundle
     openssl = Formula["openssl@1.1"]
-    inreplace "php.ini-development", /; ?openssl\.cafile=/,
-      "openssl.cafile = \"#{openssl.pkgetc}/cert.pem\""
-    inreplace "php.ini-development", /; ?openssl\.capath=/,
-      "openssl.capath = \"#{openssl.pkgetc}/certs\""
+    %w[development production].each do |mode|
+      inreplace "php.ini-#{mode}", /; ?openssl\.cafile=/,
+        "openssl.cafile = \"#{openssl.pkgetc}/cert.pem\""
+      inreplace "php.ini-#{mode}", /; ?openssl\.capath=/,
+        "openssl.capath = \"#{openssl.pkgetc}/certs\""
+    end
 
     # php 7.3 known bug
     # SO discussion: https://stackoverflow.com/a/53709484/791609
@@ -216,6 +230,7 @@ class PhpAT73 < Formula
 
     config_files = {
       "php.ini-development"   => "php.ini",
+      "php.ini-production"    => "php.ini-production",
       "sapi/fpm/php-fpm.conf" => "php-fpm.conf",
       "sapi/fpm/www.conf"     => "php-fpm.d/www.conf",
     }
@@ -252,6 +267,7 @@ class PhpAT73 < Formula
 
     # Custom location for extensions installed via pecl
     pecl_path = HOMEBREW_PREFIX/"lib/php/pecl"
+    pecl_path.mkpath
     ln_s pecl_path, prefix/"pecl" unless (prefix/"pecl").exist?
     extension_dir = Utils.safe_popen_read("#{bin}/php-config", "--extension-dir").chomp
     php_basename = File.basename(extension_dir)
@@ -313,11 +329,13 @@ class PhpAT73 < Formula
     EOS
   end
 
+  plist_options manual: "php-fpm"
   service do
     run [opt_sbin/"php-fpm", "--nodaemonize"]
+    run_type :immediate
     keep_alive true
-    working_dir var
     error_log_path var/"log/php-fpm.log"
+    working_dir var
   end
 
   test do
